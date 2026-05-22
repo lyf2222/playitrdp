@@ -15,27 +15,24 @@ jobs:
 
     - name: Download and Install Playit
       run: |
-        Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
+        Invoke-WebRequest -Uri "https://github.com" -OutFile "$env:USERPROFILE\playit.exe"
 
     - name: Enable Remote Desktop and Firewall
       run: |
-        # تفعيل الـ RDP في الريجستري
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
         
-        # تفعيل جدار الحماية بشكل كامل لاستقبال اتصال RDP
+        # تفعيل جدار الحماية للـ RDP
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
         New-NetFirewallRule -DisplayName "Allow RDP Port 3389" -Direction Inbound -LocalPort 3389 -Protocol TCP -Action Allow
         
-        # تعيين كلمة المرور لحساب runneradmin
         Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "admin@123" -Force)
 
     - name: Install rclone
       run: |
-        Invoke-WebRequest -Uri "https://downloads.rclone.org/rclone-current-windows-amd64.zip" -OutFile "$env:USERPROFILE\rclone.zip"
+        Invoke-WebRequest -Uri "https://rclone.org" -OutFile "$env:USERPROFILE\rclone.zip"
         Expand-Archive -Path "$env:USERPROFILE\rclone.zip" -DestinationPath "$env:USERPROFILE\rclone"
         
-        # أخذ المسار الصحيح وإضافته لمتغيرات النظام الدائمة حتى لا يختفي في الخطوات القادمة
         $rclonePath = (Get-ChildItem "$env:USERPROFILE\rclone" -Directory | Select-Object -First 1).FullName
         [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$rclonePath", [EnvironmentVariableTarget]::Machine)
 
@@ -49,8 +46,8 @@ jobs:
         Set-Content -Path "$configPath\rclone.conf" -Value $decoded
 
     - name: Restore files from Google Drive
+      continue-on-error: true # يسمح للسيرفر بالاستمرار والعمل حتى لو فشل الاتصال بـ Google Drive
       run: |
-        # تحديث البيئة الحالية لقراءة مسار rclone
         $rclonePath = (Get-ChildItem "$env:USERPROFILE\rclone" -Directory | Select-Object -First 1).FullName
         $env:Path += ";$rclonePath"
         rclone copy runneradmin:/full-backup C:\Users\runneradmin --create-empty-src-dirs --transfers=10 --log-level INFO
@@ -59,17 +56,16 @@ jobs:
       env:
         PLAYIT_AUTH_KEY: ${{ secrets.PL }}
       run: |
-        # تشغيل النفق في الخلفية حتى لا يعطل الخطوات اللاحقة
         Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow
 
     - name: Keep the GitHub Action Runner Alive (6 Hours)
       run: |
         Write-Host "RDP Server is now running! Connect via your playit.gg address."
-        # الحفاظ على السيرفر شغالاً لمدة 6 ساعات
         Start-Sleep -Seconds 21600  
 
     - name: Backup all files to Google Drive (Before Closing)
-      if: always() # سيتم التنفيذ حتى لو تم إلغاء السيرفر يدوياً لضمان عدم ضياع ملفاتك
+      if: always()
+      continue-on-error: true
       run: |
         $rclonePath = (Get-ChildItem "$env:USERPROFILE\rclone" -Directory | Select-Object -First 1).FullName
         $env:Path += ";$rclonePath"
@@ -77,11 +73,15 @@ jobs:
 
     - name: Restart the Workflow Automatically
       if: always()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REPO: ${{ github.repository }}
       run: |
-        # استخدام الأمر المتوافق مع PowerShell لإعادة تشغيل السيرفر تلقائياً بدورة جديدة
+        # إصلاح كود الـ API البرمجي المتوافق بالكامل مع نظام الـ PowerShell والـ GitHub Env
         $headers = @{
             "Accept" = "application/vnd.github+json"
-            "Authorization" = "Bearer ${{ secrets.GITHUB_TOKEN }}"
+            "Authorization" = "Bearer $env:GITHUB_TOKEN"
         }
         $body = '{"ref":"main"}'
-        Invoke-RestMethod -Uri "https://github.com{{ github.repository }}/actions/workflows/main.yml/dispatches" -Method Post -Headers $headers -Body $body -ContentType "application/json"
+        $apiUrl = "https://github.com"
+        Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body -ContentType "application/json"
