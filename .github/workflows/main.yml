@@ -16,31 +16,28 @@ jobs:
     - name: Download and Install Playit
       run: |
         Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
-        Start-Sleep -Seconds 5
 
-    - name: Enable Remote Desktop
+    - name: Enable Remote Desktop and Firewall
       run: |
+        # تفعيل الـ RDP في الريجستري
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+        
+        # تفعيل جدار الحماية بشكل كامل لاستقبال اتصال RDP
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        New-NetFirewallRule -DisplayName "Allow RDP Port 3389" -Direction Inbound -LocalPort 3389 -Protocol TCP -Action Allow
+        
+        # تعيين كلمة المرور لحساب runneradmin
         Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "admin@123" -Force)
 
-    - name: Start Playit Tunnel
-      env:
-        PLAYIT_AUTH_KEY: ${{ secrets.PL }}
-      run: |
-        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow -Wait
-        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -NoNewWindow
-
-    # ---------------------------
-    # استرجاع الملفات من Google Drive
-    # ---------------------------
     - name: Install rclone
       run: |
         Invoke-WebRequest -Uri "https://downloads.rclone.org/rclone-current-windows-amd64.zip" -OutFile "$env:USERPROFILE\rclone.zip"
         Expand-Archive -Path "$env:USERPROFILE\rclone.zip" -DestinationPath "$env:USERPROFILE\rclone"
-        $rclonePath = Get-ChildItem "$env:USERPROFILE\rclone" -Directory | Select-Object -First 1
-        $env:Path += ";$($rclonePath.FullName)"
+        
+        # أخذ المسار الصحيح وإضافته لمتغيرات النظام الدائمة حتى لا يختفي في الخطوات القادمة
+        $rclonePath = (Get-ChildItem "$env:USERPROFILE\rclone" -Directory | Select-Object -First 1).FullName
+        [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$rclonePath", [EnvironmentVariableTarget]::Machine)
 
     - name: Create rclone config file
       env:
@@ -53,29 +50,38 @@ jobs:
 
     - name: Restore files from Google Drive
       run: |
+        # تحديث البيئة الحالية لقراءة مسار rclone
+        $rclonePath = (Get-ChildItem "$env:USERPROFILE\rclone" -Directory | Select-Object -First 1).FullName
+        $env:Path += ";$rclonePath"
         rclone copy runneradmin:/full-backup C:\Users\runneradmin --create-empty-src-dirs --transfers=10 --log-level INFO
 
-    # ---------------------------
-    # إبقاء الجلسة حية
-    # ---------------------------
-    - name: Keep the GitHub Action Runner Alive
-      run: Start-Sleep -Seconds 21600  # 6 ساعات
-
-    # ---------------------------
-    # نسخ الملفات احتياطيًا إلى Google Drive
-    # ---------------------------
-    - name: Backup all files to Google Drive
+    - name: Start Playit Tunnel (Background)
+      env:
+        PLAYIT_AUTH_KEY: ${{ secrets.PL }}
       run: |
+        # تشغيل النفق في الخلفية حتى لا يعطل الخطوات اللاحقة
+        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow
+
+    - name: Keep the GitHub Action Runner Alive (6 Hours)
+      run: |
+        Write-Host "RDP Server is now running! Connect via your playit.gg address."
+        # الحفاظ على السيرفر شغالاً لمدة 6 ساعات
+        Start-Sleep -Seconds 21600  
+
+    - name: Backup all files to Google Drive (Before Closing)
+      if: always() # سيتم التنفيذ حتى لو تم إلغاء السيرفر يدوياً لضمان عدم ضياع ملفاتك
+      run: |
+        $rclonePath = (Get-ChildItem "$env:USERPROFILE\rclone" -Directory | Select-Object -First 1).FullName
+        $env:Path += ";$rclonePath"
         rclone copy C:\Users\runneradmin runneradmin:/full-backup --create-empty-src-dirs --transfers=10 --log-level INFO
 
-    # ---------------------------
-    # إعادة التشغيل التلقائي
-    # ---------------------------
     - name: Restart the Workflow Automatically
-      if: ${{ success() }}
+      if: always()
       run: |
-        curl -X POST ^
-          -H "Accept: application/vnd.github+json" ^
-          -H "Authorization: Bearer ${{ secrets.PL }}" ^
-          https://api.github.com/repos/lyf2222/playitrdp/actions/workflows/main.yml/dispatches ^
-          -d "{\"ref\":\"main\"}"
+        # استخدام الأمر المتوافق مع PowerShell لإعادة تشغيل السيرفر تلقائياً بدورة جديدة
+        $headers = @{
+            "Accept" = "application/vnd.github+json"
+            "Authorization" = "Bearer ${{ secrets.GITHUB_TOKEN }}"
+        }
+        $body = '{"ref":"main"}'
+        Invoke-RestMethod -Uri "https://github.com{{ github.repository }}/actions/workflows/main.yml/dispatches" -Method Post -Headers $headers -Body $body -ContentType "application/json"
