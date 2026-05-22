@@ -3,136 +3,79 @@ name: lserver_luai
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
-
-permissions:
-  actions: write
-  contents: read
+    - cron: '0 */6 * * *'  # كل 6 ساعات
 
 jobs:
   setup-rdp-tunnel:
-
     runs-on: windows-latest
-    timeout-minutes: 360
 
     steps:
+    - name: Check out the repository
+      uses: actions/checkout@v2
 
-      - name: Check out the repository
-        uses: actions/checkout@v4
+    - name: Download and Install Playit
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
+        Start-Sleep -Seconds 5
 
-      - name: Download and Install Playit
-        shell: powershell
-        run: |
+    - name: Enable Remote Desktop
+      run: |
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+        Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "admin@123" -Force)
 
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    - name: Start Playit Tunnel
+      env:
+        PLAYIT_AUTH_KEY: ${{ secrets.PL }}
+      run: |
+        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow -Wait
+        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -NoNewWindow
 
-          $url = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-amd64.exe"
+    # ---------------------------
+    # استرجاع الملفات من Google Drive
+    # ---------------------------
+    - name: Install rclone
+      run: |
+        Invoke-WebRequest -Uri "https://downloads.rclone.org/rclone-current-windows-amd64.zip" -OutFile "$env:USERPROFILE\rclone.zip"
+        Expand-Archive -Path "$env:USERPROFILE\rclone.zip" -DestinationPath "$env:USERPROFILE\rclone"
+        $rclonePath = Get-ChildItem "$env:USERPROFILE\rclone" -Directory | Select-Object -First 1
+        $env:Path += ";$($rclonePath.FullName)"
 
-          $output = "$env:USERPROFILE\playit.exe"
+    - name: Create rclone config file
+      env:
+        RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
+      run: |
+        $configPath = "$env:USERPROFILE\.config\rclone"
+        New-Item -Path $configPath -ItemType Directory -Force
+        $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:RCLONE_CONFIG))
+        Set-Content -Path "$configPath\rclone.conf" -Value $decoded
 
-          Invoke-WebRequest `
-            -Uri $url `
-            -OutFile $output `
-            -MaximumRedirection 10 `
-            -UserAgent "Mozilla/5.0" `
-            -UseBasicParsing
+    - name: Restore files from Google Drive
+      run: |
+        rclone copy runneradmin:/full-backup C:\Users\runneradmin --create-empty-src-dirs --transfers=10 --log-level INFO
 
-          if (!(Test-Path $output)) {
-              throw "playit.exe not downloaded"
-          }
+    # ---------------------------
+    # إبقاء الجلسة حية
+    # ---------------------------
+    - name: Keep the GitHub Action Runner Alive
+      run: Start-Sleep -Seconds 21600  # 6 ساعات
 
-          $size = (Get-Item $output).Length
+    # ---------------------------
+    # نسخ الملفات احتياطيًا إلى Google Drive
+    # ---------------------------
+    - name: Backup all files to Google Drive
+      run: |
+        rclone copy C:\Users\runneradmin runneradmin:/full-backup --create-empty-src-dirs --transfers=10 --log-level INFO
 
-          Write-Host "Downloaded Size: $size"
-
-          if ($size -lt 1000000) {
-              throw "Downloaded file is invalid"
-          }
-
-          Write-Host "Playit downloaded successfully"
-
-          Start-Sleep -Seconds 5
-
-      - name: Enable Remote Desktop
-        shell: powershell
-        run: |
-
-          Set-ItemProperty `
-            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-            -Name "fDenyTSConnections" `
-            -Value 0
-
-          Enable-NetFirewallRule `
-            -DisplayGroup "Remote Desktop"
-
-          Set-ItemProperty `
-            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-            -Name "UserAuthentication" `
-            -Value 1
-
-          Set-LocalUser `
-            -Name "runneradmin" `
-            -Password (
-              ConvertTo-SecureString `
-              -AsPlainText "admin@123" `
-              -Force
-            )
-
-      - name: Start Playit Tunnel
-        shell: powershell
-        env:
-          PLAYIT_AUTH_KEY: ${{ secrets.PL }}
-        run: |
-
-          Start-Job -ScriptBlock {
-            & "$env:USERPROFILE\playit.exe" --secret $env:PLAYIT_AUTH_KEY
-          }
-
-          Start-Sleep -Seconds 20
-
-      - name: Show RDP Information
-        shell: powershell
-        run: |
-
-          Write-Host ""
-          Write-Host "========================================="
-          Write-Host "RDP READY"
-          Write-Host "========================================="
-          Write-Host "USERNAME: runneradmin"
-          Write-Host "PASSWORD: admin@123"
-          Write-Host "========================================="
-          Write-Host ""
-
-      - name: Keep the GitHub Action Runner Alive
-        shell: powershell
-        run: |
-
-          Start-Sleep -Seconds 21600
-
-      - name: Restart the Workflow Automatically
-        if: always()
-        shell: powershell
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-
-          $repo = "${{ github.repository }}"
-          $apiUrl = "https://api.github.com/repos/$repo/actions/workflows/main.yml/dispatches"
-
-          $headers = @{
-            Authorization = "Bearer $env:GITHUB_TOKEN"
-            Accept        = "application/vnd.github+json"
-          }
-
-          $body = @{
-            ref = "main"
-          } | ConvertTo-Json
-
-          Invoke-RestMethod `
-            -Uri $apiUrl `
-            -Method Post `
-            -Headers $headers `
-            -Body $body `
-            -ContentType "application/json"
-
-          Write-Host "Workflow restarted successfully"
+    # ---------------------------
+    # إعادة التشغيل التلقائي
+    # ---------------------------
+    - name: Restart the Workflow Automatically
+      if: ${{ success() }}
+      run: |
+        curl -X POST ^
+          -H "Accept: application/vnd.github+json" ^
+          -H "Authorization: Bearer ${{ secrets.PL }}" ^
+          https://api.github.com/repos/lyf2222/playitrdp/actions/workflows/main.yml/dispatches ^
+          -d "{\"ref\":\"main\"}"
