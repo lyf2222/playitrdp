@@ -1,1 +1,127 @@
-name: lserver_luai on: workflow_dispatch: schedule: - cron: '0 */6 * * *' permissions: actions: write contents: read jobs: setup-rdp-tunnel: runs-on: windows-2022 timeout-minutes: 360 steps: # ============================================ # Checkout Repository # ============================================ - name: Checkout Repository uses: actions/checkout@v4 # ============================================ # Enable Remote Desktop # ============================================ - name: Enable Remote Desktop shell: powershell run: | Set-ItemProperty ` -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' ` -Name "fDenyTSConnections" ` -Value 0 Enable-NetFirewallRule ` -DisplayGroup "Remote Desktop" Set-ItemProperty ` -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' ` -Name "UserAuthentication" ` -Value 1 Set-LocalUser ` -Name "runneradmin" ` -Password ( ConvertTo-SecureString ` -AsPlainText "Admin@123456" ` -Force ) # ============================================ # Download Playit # ============================================ - name: Download Playit shell: powershell run: | Invoke-WebRequest ` -Uri "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-amd64.exe" ` -OutFile "$env:USERPROFILE\playit.exe" Start-Sleep -Seconds 5 # ============================================ # Start Playit Tunnel # ============================================ - name: Start Playit Tunnel shell: powershell env: PLAYIT_AUTH_KEY: ${{ secrets.PL }} run: | Start-Process ` -FilePath "$env:USERPROFILE\playit.exe" ` -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" ` -WindowStyle Hidden Start-Sleep -Seconds 20 # ============================================ # Show RDP Information # ============================================ - name: Show RDP Information shell: powershell run: | Write-Host "" Write-Host "=========================================" Write-Host "RDP READY" Write-Host "=========================================" Write-Host "USERNAME: runneradmin" Write-Host "PASSWORD: Admin@123456" Write-Host "=========================================" Write-Host "" # ============================================ # Keep Runner Alive # ============================================ - name: Keep Runner Alive shell: powershell run: | for ($i=1; $i -le 21600; $i++) { if ($i % 60 -eq 0) { Write-Host "Running for $i seconds..." } Start-Sleep -Seconds 1 } # ============================================ # Restart Workflow Automatically # ============================================ - name: Restart Workflow if: always() shell: powershell env: GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} run: | $repo = "${{ github.repository }}" $workflow = "main.yml" $apiUrl = "https://api.github.com/repos/$repo/actions/workflows/$workflow/dispatches" $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN" Accept = "application/vnd.github+json" } $body = @{ ref = "main" } | ConvertTo-Json Invoke-RestMethod ` -Uri $apiUrl ` -Method Post ` -Headers $headers ` -Body $body ` -ContentType "application/json" Write-Host "Workflow restarted successfully"
+name: lserver_luai
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  setup-rdp-tunnel:
+
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    steps:
+
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Enable Remote Desktop
+      shell: powershell
+      run: |
+
+        Set-ItemProperty `
+          -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+          -Name "fDenyTSConnections" `
+          -Value 0
+
+        Enable-NetFirewallRule `
+          -DisplayGroup "Remote Desktop"
+
+        Set-ItemProperty `
+          -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+          -Name "UserAuthentication" `
+          -Value 1
+
+        Set-LocalUser `
+          -Name "runneradmin" `
+          -Password (
+            ConvertTo-SecureString `
+            -AsPlainText "Admin@123456" `
+            -Force
+          )
+
+    - name: Download Playit
+      shell: powershell
+      run: |
+
+        Invoke-WebRequest `
+          -Uri "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-amd64.exe" `
+          -OutFile "$env:USERPROFILE\playit.exe"
+
+        Start-Sleep -Seconds 5
+
+    - name: Start Playit Tunnel
+      shell: powershell
+      env:
+        PLAYIT_AUTH_KEY: ${{ secrets.PL }}
+      run: |
+
+        Start-Process `
+          -FilePath "$env:USERPROFILE\playit.exe" `
+          -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" `
+          -WindowStyle Hidden
+
+        Start-Sleep -Seconds 20
+
+    - name: Show RDP Information
+      shell: powershell
+      run: |
+
+        Write-Host ""
+        Write-Host "========================================="
+        Write-Host "RDP READY"
+        Write-Host "========================================="
+        Write-Host "USERNAME: runneradmin"
+        Write-Host "PASSWORD: Admin@123456"
+        Write-Host "========================================="
+        Write-Host ""
+
+    - name: Keep Runner Alive
+      shell: powershell
+      run: |
+
+        for ($i=1; $i -le 21600; $i++) {
+
+          if ($i % 60 -eq 0) {
+
+            Write-Host "Running for $i seconds..."
+
+          }
+
+          Start-Sleep -Seconds 1
+        }
+
+    - name: Restart Workflow
+      if: always()
+      shell: powershell
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+
+        $repo = "${{ github.repository }}"
+        $workflow = "main.yml"
+
+        $apiUrl = "https://api.github.com/repos/$repo/actions/workflows/$workflow/dispatches"
+
+        $headers = @{
+          Authorization = "Bearer $env:GITHUB_TOKEN"
+          Accept        = "application/vnd.github+json"
+        }
+
+        $body = @{
+          ref = "main"
+        } | ConvertTo-Json
+
+        Invoke-RestMethod `
+          -Uri $apiUrl `
+          -Method Post `
+          -Headers $headers `
+          -Body $body `
+          -ContentType "application/json"
+
+        Write-Host "Workflow restarted successfully"
