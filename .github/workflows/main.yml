@@ -3,7 +3,7 @@ name: lserver_luai
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'  # كل 6 ساعات
+    - cron: '0 */6 * * *'  # إعادة تشغيل تلقائية مجدولة كل 6 ساعات
 
 jobs:
   setup-rdp-tunnel:
@@ -19,57 +19,29 @@ jobs:
 
     - name: Enable Remote Desktop and Firewall
       run: |
+        # 1. تفعيل بروتوكول الـ RDP في الريجستري
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
         
-        # تفعيل جدار الحماية للـ RDP
+        # 2. فتح جدار الحماية للويندوز لاستقبال اتصال الـ RDP الخارجي
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
         New-NetFirewallRule -DisplayName "Allow RDP Port 3389" -Direction Inbound -LocalPort 3389 -Protocol TCP -Action Allow
         
+        # 3. تعيين كلمة المرور لحساب تسجيل الدخول (runneradmin)
         Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "admin@123" -Force)
-
-    - name: Install rclone
-      run: |
-        Invoke-WebRequest -Uri "https://rclone.org" -OutFile "$env:USERPROFILE\rclone.zip"
-        Expand-Archive -Path "$env:USERPROFILE\rclone.zip" -DestinationPath "$env:USERPROFILE\rclone"
-        
-        $rclonePath = (Get-ChildItem "$env:USERPROFILE\rclone" -Directory | Select-Object -First 1).FullName
-        [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$rclonePath", [EnvironmentVariableTarget]::Machine)
-
-    - name: Create rclone config file
-      env:
-        RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
-      run: |
-        $configPath = "$env:USERPROFILE\.config\rclone"
-        New-Item -Path $configPath -ItemType Directory -Force
-        $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:RCLONE_CONFIG))
-        Set-Content -Path "$configPath\rclone.conf" -Value $decoded
-
-    - name: Restore files from Google Drive
-      continue-on-error: true # يسمح للسيرفر بالاستمرار والعمل حتى لو فشل الاتصال بـ Google Drive
-      run: |
-        $rclonePath = (Get-ChildItem "$env:USERPROFILE\rclone" -Directory | Select-Object -First 1).FullName
-        $env:Path += ";$rclonePath"
-        rclone copy runneradmin:/full-backup C:\Users\runneradmin --create-empty-src-dirs --transfers=10 --log-level INFO
 
     - name: Start Playit Tunnel (Background)
       env:
         PLAYIT_AUTH_KEY: ${{ secrets.PL }}
       run: |
+        # تشغيل برنامج playit في الخلفية ليتيح بقية خطوات الـ YAML
         Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow
 
     - name: Keep the GitHub Action Runner Alive (6 Hours)
       run: |
         Write-Host "RDP Server is now running! Connect via your playit.gg address."
+        # الحفاظ على تشغيل السيرفر حياً لمدة 6 ساعات متواصلة
         Start-Sleep -Seconds 21600  
-
-    - name: Backup all files to Google Drive (Before Closing)
-      if: always()
-      continue-on-error: true
-      run: |
-        $rclonePath = (Get-ChildItem "$env:USERPROFILE\rclone" -Directory | Select-Object -First 1).FullName
-        $env:Path += ";$rclonePath"
-        rclone copy C:\Users\runneradmin runneradmin:/full-backup --create-empty-src-dirs --transfers=10 --log-level INFO
 
     - name: Restart the Workflow Automatically
       if: always()
@@ -77,7 +49,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         REPO: ${{ github.repository }}
       run: |
-        # إصلاح كود الـ API البرمجي المتوافق بالكامل مع نظام الـ PowerShell والـ GitHub Env
+        # كود الـ API المصلح لإعادة تشغيل السيرفر تلقائياً بدورة جديدة فور انتهاء الـ 6 ساعات
         $headers = @{
             "Accept" = "application/vnd.github+json"
             "Authorization" = "Bearer $env:GITHUB_TOKEN"
