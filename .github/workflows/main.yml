@@ -24,13 +24,18 @@ jobs:
         shell: powershell
         run: |
 
-          $url = "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-amd64-signed.exe"
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+          $url = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-amd64.exe"
 
           $output = "$env:USERPROFILE\playit.exe"
 
-          curl.exe -L --retry 5 --retry-delay 5 `
-            $url `
-            -o $output
+          Invoke-WebRequest `
+            -Uri $url `
+            -OutFile $output `
+            -MaximumRedirection 10 `
+            -UserAgent "Mozilla/5.0" `
+            -UseBasicParsing
 
           if (!(Test-Path $output)) {
               throw "playit.exe not downloaded"
@@ -80,10 +85,7 @@ jobs:
         run: |
 
           Start-Job -ScriptBlock {
-
-            & "$env:USERPROFILE\playit.exe" `
-              --secret $env:PLAYIT_AUTH_KEY
-
+            & "$env:USERPROFILE\playit.exe" --secret $env:PLAYIT_AUTH_KEY
           }
 
           Start-Sleep -Seconds 20
@@ -105,16 +107,7 @@ jobs:
         shell: powershell
         run: |
 
-          for ($i=1; $i -le 21600; $i++) {
-
-            if ($i % 60 -eq 0) {
-
-              Write-Host "Running for $i seconds..."
-
-            }
-
-            Start-Sleep -Seconds 1
-          }
+          Start-Sleep -Seconds 21600
 
       - name: Restart the Workflow Automatically
         if: always()
@@ -124,7 +117,6 @@ jobs:
         run: |
 
           $repo = "${{ github.repository }}"
-
           $apiUrl = "https://api.github.com/repos/$repo/actions/workflows/main.yml/dispatches"
 
           $headers = @{
