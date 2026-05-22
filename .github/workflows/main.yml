@@ -13,10 +13,13 @@ jobs:
     - name: Check out the repository
       uses: actions/checkout@v2
 
-    - name: Download and Install Playit (Portable)
+    - name: Download Playit Client (Fixed URL & Method)
       run: |
-        # تحميل النسخة المحمولة المباشرة والمتوافقة بنسبة 100% مع بيئة الأوامر السحابية
-        Invoke-WebRequest -Uri "https://github.com" -OutFile "$env:USERPROFILE\playit.exe"
+        # استخدام curl مع خيار -L لضمان تحميل الملف كاملاً ومباشرة دون تلف
+        curl.exe -L "https://github.com" -o "$env:USERPROFILE\playit.exe"
+        
+        # سطر فحص للتأكد من حجم الملف في مخرجات GitHub لضمان عدم تحميله فارغاً
+        Get-Item "$env:USERPROFILE\playit.exe" | Select-Object Name, Length
 
     - name: Enable Remote Desktop and Firewall
       run: |
@@ -35,7 +38,7 @@ jobs:
       env:
         PLAYIT_AUTH_KEY: ${{ secrets.PL }}
       run: |
-        # تشغيل برنامج playit في الخلفية بنجاح
+        # تشغيل برنامج playit في الخلفية بنجاح بعد تحميله بشكل سليم
         Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow
 
     - name: Keep the GitHub Action Runner Alive (6 Hours)
