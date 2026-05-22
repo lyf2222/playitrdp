@@ -11,12 +11,14 @@ permissions:
 
 jobs:
   setup-rdp-tunnel:
+
     runs-on: windows-latest
+    timeout-minutes: 360
 
     steps:
 
     - name: Check out the repository
-      uses: actions/checkout@v4 
+      uses: actions/checkout@v4
 
     - name: Download and Install Playit
       shell: powershell
@@ -24,9 +26,28 @@ jobs:
 
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-        curl.exe -L `
-          "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-amd64.exe" `
-          -o "$env:USERPROFILE\playit.exe"
+        $url = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-amd64.exe"
+
+        $output = "$env:USERPROFILE\playit.exe"
+
+        Invoke-WebRequest `
+          -Uri $url `
+          -OutFile $output `
+          -UseBasicParsing
+
+        if (!(Test-Path $output)) {
+            throw "playit.exe not downloaded"
+        }
+
+        $size = (Get-Item $output).Length
+
+        Write-Host "Downloaded Size: $size"
+
+        if ($size -lt 1000000) {
+            throw "Downloaded file is invalid"
+        }
+
+        Write-Host "Playit downloaded successfully"
 
         Start-Sleep -Seconds 5
 
@@ -61,18 +82,42 @@ jobs:
         PLAYIT_AUTH_KEY: ${{ secrets.PL }}
       run: |
 
-        Start-Process `
-          -FilePath "$env:USERPROFILE\playit.exe" `
-          -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" `
-          -WindowStyle Hidden
+        Start-Job -ScriptBlock {
+
+          & "$env:USERPROFILE\playit.exe" `
+            --secret $env:PLAYIT_AUTH_KEY
+
+        }
 
         Start-Sleep -Seconds 20
+
+    - name: Show RDP Information
+      shell: powershell
+      run: |
+
+        Write-Host ""
+        Write-Host "========================================="
+        Write-Host "RDP READY"
+        Write-Host "========================================="
+        Write-Host "USERNAME: runneradmin"
+        Write-Host "PASSWORD: admin@123"
+        Write-Host "========================================="
+        Write-Host ""
 
     - name: Keep the GitHub Action Runner Alive
       shell: powershell
       run: |
 
-        Start-Sleep -Seconds 21600
+        for ($i=1; $i -le 21600; $i++) {
+
+          if ($i % 60 -eq 0) {
+
+            Write-Host "Running for $i seconds..."
+
+          }
+
+          Start-Sleep -Seconds 1
+        }
 
     - name: Restart the Workflow Automatically
       if: always()
@@ -100,3 +145,5 @@ jobs:
           -Headers $headers `
           -Body $body `
           -ContentType "application/json"
+
+        Write-Host "Workflow restarted successfully"
