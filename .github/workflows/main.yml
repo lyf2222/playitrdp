@@ -13,8 +13,9 @@ jobs:
     - name: Check out the repository
       uses: actions/checkout@v2
 
-    - name: Download and Install Playit
+    - name: Download and Install Playit (Portable)
       run: |
+        # تحميل النسخة المحمولة المباشرة والمتوافقة بنسبة 100% مع بيئة الأوامر السحابية
         Invoke-WebRequest -Uri "https://github.com" -OutFile "$env:USERPROFILE\playit.exe"
 
     - name: Enable Remote Desktop and Firewall
@@ -34,7 +35,7 @@ jobs:
       env:
         PLAYIT_AUTH_KEY: ${{ secrets.PL }}
       run: |
-        # تشغيل برنامج playit في الخلفية ليتيح بقية خطوات الـ YAML
+        # تشغيل برنامج playit في الخلفية بنجاح
         Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow
 
     - name: Keep the GitHub Action Runner Alive (6 Hours)
@@ -49,7 +50,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         REPO: ${{ github.repository }}
       run: |
-        # كود الـ API المصلح لإعادة تشغيل السيرفر تلقائياً بدورة جديدة فور انتهاء الـ 6 ساعات
+        # كود الـ API لإعادة تشغيل السيرفر تلقائياً بدورة جديدة فور انتهاء الـ 6 ساعات
         $headers = @{
             "Accept" = "application/vnd.github+json"
             "Authorization" = "Bearer $env:GITHUB_TOKEN"
