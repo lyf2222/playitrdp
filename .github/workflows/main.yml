@@ -38,11 +38,4 @@ jobs:
     # ---------------------------
     # إعادة التشغيل التلقائي
     # ---------------------------
-    - name: Restart the Workflow Automatically
-      if: ${{ success() }}
-      run: |
-        curl -X POST ^
-          -H "Accept: application/vnd.github+json" ^
-          -H "Authorization: Bearer ${{ secrets.PL }}" ^
-          https://api.github.com/repos/lyf2222/playitrdp/actions/workflows/main.yml/dispatches ^
-          -d "{\"ref\":\"main\"}"
+   
