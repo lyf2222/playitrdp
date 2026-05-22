@@ -1,89 +1,61 @@
-name: lserver_luai
+name: Windows RDP + Cloudflare Tunnel
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 */6 * * *'
 
 jobs:
-  setup-rdp-tunnel:
+  rdp:
     runs-on: windows-latest
     timeout-minutes: 360
 
     steps:
 
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Download Playit
-      shell: powershell
-      run: |
-
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-        $url = "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe"
-
-        $output = "$env:USERPROFILE\playit.exe"
-
-        Invoke-WebRequest -Uri $url -OutFile $output -UseBasicParsing
-
-        Write-Host "Playit downloaded"
-
     - name: Enable RDP
       shell: powershell
       run: |
 
-        net user runneradmin "admin@123"
-
-        Set-ItemProperty `
-          -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
-          -Name "fDenyTSConnections" `
-          -Value 0
-
+        Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-    - name: Start Playit (stable mode)
+        net user runneradmin "Admin@123"
+
+        Write-Host "RDP Enabled"
+
+    - name: Download Cloudflared
       shell: powershell
-      env:
-        PLAYIT_AUTH_KEY: ${{ secrets.PL }}
+      run: |
+
+        Invoke-WebRequest `
+          -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" `
+          -OutFile "$env:USERPROFILE\cloudflared.exe"
+
+        Write-Host "Cloudflared downloaded"
+
+    - name: Start Tunnel
+      shell: powershell
       run: |
 
         Start-Process `
-          -FilePath "$env:USERPROFILE\playit.exe" `
-          -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" `
+          -FilePath "$env:USERPROFILE\cloudflared.exe" `
+          -ArgumentList "tunnel --url rdp://localhost:3389" `
           -WindowStyle Hidden
 
         Start-Sleep -Seconds 15
 
-        Write-Host "Playit running"
+        Write-Host "Tunnel started"
+
+    - name: Show RDP Info
+      shell: powershell
+      run: |
+
+        Write-Host "=========================="
+        Write-Host "RDP READY"
+        Write-Host "USERNAME: runneradmin"
+        Write-Host "PASSWORD: Admin@123"
+        Write-Host "=========================="
 
     - name: Keep Alive
       shell: powershell
       run: |
 
-        while ($true) {
-          Start-Sleep -Seconds 60
-          Write-Host "alive..."
-        }
-
-    - name: Restart Workflow
-      if: always()
-      shell: powershell
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-
-        $repo = "${{ github.repository }}"
-        $url = "https://api.github.com/repos/$repo/actions/workflows/main.yml/dispatches"
-
-        $body = @{ ref = "main" } | ConvertTo-Json
-
-        Invoke-RestMethod `
-          -Uri $url `
-          -Method Post `
-          -Headers @{
-            Authorization = "Bearer $env:GITHUB_TOKEN"
-            Accept = "application/vnd.github+json"
-          } `
-          -Body $body `
-          -ContentType "application/json"
+        Start-Sleep -Seconds 21600
