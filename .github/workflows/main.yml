@@ -17,133 +17,130 @@ jobs:
 
     steps:
 
-    - name: Check out the repository
-      uses: actions/checkout@v4
+      - name: Check out the repository
+        uses: actions/checkout@v4
 
-    - name: Download and Install Playit
-      shell: powershell
-      run: |
+      - name: Download and Install Playit
+        shell: powershell
+        run: |
 
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $url = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-amd64.exe"
 
-        $url = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-amd64.exe"
+          $output = "$env:USERPROFILE\playit.exe"
 
-        $output = "$env:USERPROFILE\playit.exe"
+          curl.exe -L --retry 5 --retry-delay 5 `
+            $url `
+            -o $output
 
-        Invoke-WebRequest `
-          -Uri $url `
-          -OutFile $output `
-          -UseBasicParsing
+          if (!(Test-Path $output)) {
+              throw "playit.exe not downloaded"
+          }
 
-        if (!(Test-Path $output)) {
-            throw "playit.exe not downloaded"
-        }
+          $size = (Get-Item $output).Length
 
-        $size = (Get-Item $output).Length
+          Write-Host "Downloaded Size: $size"
 
-        Write-Host "Downloaded Size: $size"
+          if ($size -lt 1000000) {
+              throw "Downloaded file is invalid"
+          }
 
-        if ($size -lt 1000000) {
-            throw "Downloaded file is invalid"
-        }
+          Write-Host "Playit downloaded successfully"
 
-        Write-Host "Playit downloaded successfully"
+          Start-Sleep -Seconds 5
 
-        Start-Sleep -Seconds 5
+      - name: Enable Remote Desktop
+        shell: powershell
+        run: |
 
-    - name: Enable Remote Desktop
-      shell: powershell
-      run: |
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name "fDenyTSConnections" `
+            -Value 0
 
-        Set-ItemProperty `
-          -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-          -Name "fDenyTSConnections" `
-          -Value 0
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop"
 
-        Enable-NetFirewallRule `
-          -DisplayGroup "Remote Desktop"
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+            -Name "UserAuthentication" `
+            -Value 1
 
-        Set-ItemProperty `
-          -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-          -Name "UserAuthentication" `
-          -Value 1
+          Set-LocalUser `
+            -Name "runneradmin" `
+            -Password (
+              ConvertTo-SecureString `
+              -AsPlainText "admin@123" `
+              -Force
+            )
 
-        Set-LocalUser `
-          -Name "runneradmin" `
-          -Password (
-            ConvertTo-SecureString `
-            -AsPlainText "admin@123" `
-            -Force
-          )
+      - name: Start Playit Tunnel
+        shell: powershell
+        env:
+          PLAYIT_AUTH_KEY: ${{ secrets.PL }}
+        run: |
 
-    - name: Start Playit Tunnel
-      shell: powershell
-      env:
-        PLAYIT_AUTH_KEY: ${{ secrets.PL }}
-      run: |
+          Start-Job -ScriptBlock {
 
-        Start-Job -ScriptBlock {
-
-          & "$env:USERPROFILE\playit.exe" `
-            --secret $env:PLAYIT_AUTH_KEY
-
-        }
-
-        Start-Sleep -Seconds 20
-
-    - name: Show RDP Information
-      shell: powershell
-      run: |
-
-        Write-Host ""
-        Write-Host "========================================="
-        Write-Host "RDP READY"
-        Write-Host "========================================="
-        Write-Host "USERNAME: runneradmin"
-        Write-Host "PASSWORD: admin@123"
-        Write-Host "========================================="
-        Write-Host ""
-
-    - name: Keep the GitHub Action Runner Alive
-      shell: powershell
-      run: |
-
-        for ($i=1; $i -le 21600; $i++) {
-
-          if ($i % 60 -eq 0) {
-
-            Write-Host "Running for $i seconds..."
+            & "$env:USERPROFILE\playit.exe" `
+              --secret $env:PLAYIT_AUTH_KEY
 
           }
 
-          Start-Sleep -Seconds 1
-        }
+          Start-Sleep -Seconds 20
 
-    - name: Restart the Workflow Automatically
-      if: always()
-      shell: powershell
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
+      - name: Show RDP Information
+        shell: powershell
+        run: |
 
-        $repo = "${{ github.repository }}"
+          Write-Host ""
+          Write-Host "========================================="
+          Write-Host "RDP READY"
+          Write-Host "========================================="
+          Write-Host "USERNAME: runneradmin"
+          Write-Host "PASSWORD: admin@123"
+          Write-Host "========================================="
+          Write-Host ""
 
-        $apiUrl = "https://api.github.com/repos/$repo/actions/workflows/main.yml/dispatches"
+      - name: Keep the GitHub Action Runner Alive
+        shell: powershell
+        run: |
 
-        $headers = @{
-          Authorization = "Bearer $env:GITHUB_TOKEN"
-          Accept        = "application/vnd.github+json"
-        }
+          for ($i=1; $i -le 21600; $i++) {
 
-        $body = @{
-          ref = "main"
-        } | ConvertTo-Json
+            if ($i % 60 -eq 0) {
 
-        Invoke-RestMethod `
-          -Uri $apiUrl `
-          -Method Post `
-          -Headers $headers `
-          -Body $body `
-          -ContentType "application/json"
+              Write-Host "Running for $i seconds..."
 
-        Write-Host "Workflow restarted successfully"
+            }
+
+            Start-Sleep -Seconds 1
+          }
+
+      - name: Restart the Workflow Automatically
+        if: always()
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+
+          $repo = "${{ github.repository }}"
+
+          $apiUrl = "https://api.github.com/repos/$repo/actions/workflows/main.yml/dispatches"
+
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept        = "application/vnd.github+json"
+          }
+
+          $body = @{
+            ref = "main"
+          } | ConvertTo-Json
+
+          Invoke-RestMethod `
+            -Uri $apiUrl `
+            -Method Post `
+            -Headers $headers `
+            -Body $body `
+            -ContentType "application/json"
+
+          Write-Host "Workflow restarted successfully"
